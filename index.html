@@ -834,10 +834,6 @@ body.light .modal{box-shadow:0 24px 64px rgba(0,0,0,0.15);}
   <div class="pdf-viewer-bar">
     <div class="pdf-viewer-title" id="pdfViewerTitle">Documento</div>
     <div style="display:flex;gap:8px;align-items:center;">
-      <button class="btn" id="pdfGenBtn" onclick="openAiGenModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        Generar flashcards con IA
-      </button>
       <button class="btn" onclick="closePdfViewer()">✕ Cerrar</button>
     </div>
   </div>
@@ -861,43 +857,6 @@ body.light .modal{box-shadow:0 24px 64px rgba(0,0,0,0.15);}
   </div>
 </div>
 
-<!-- AI Generation Modal -->
-<div class="overlay" id="overlay-aigen">
-  <div class="modal" style="max-width:600px;max-height:85vh;overflow-y:auto;">
-    <div class="modal-title">✨ Generar flashcards con IA</div>
-    <div class="ai-panel" style="margin-bottom:16px;">
-      <div style="font-size:0.85rem;color:var(--muted);line-height:1.6;margin-bottom:14px;">
-        La IA analizará tu PDF y generará preguntas y respuestas automáticamente. 
-        Puedes elegir cuántas tarjetas quieres.
-      </div>
-      <div class="ai-controls">
-        <label style="font-size:0.8rem;color:var(--muted);">Número de tarjetas:</label>
-        <input class="ai-count-input" type="number" id="aiCardCount" value="15" min="5" max="50">
-        <button class="btn btn-primary" id="aiGenerateBtn" onclick="generateFlashcardsFromPdf()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          Generar
-        </button>
-      </div>
-      <div class="ai-status" id="aiStatus" style="margin-top:12px;display:none;">
-        <span class="spinner"></span>
-        <span id="aiStatusText">Analizando el PDF...</span>
-      </div>
-    </div>
-    <div id="aiPreviewArea" style="display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <div style="font-size:0.88rem;color:var(--muted);" id="aiPreviewCount"></div>
-        <div style="display:flex;gap:8px;">
-          <input class="modal-input" id="aiDeckName" placeholder="Nombre del mazo..." style="width:200px;">
-          <button class="btn btn-primary" onclick="saveAiCards()">Guardar como mazo</button>
-        </div>
-      </div>
-      <div class="ai-preview-cards" id="aiPreviewCards"></div>
-    </div>
-    <div class="modal-actions" style="margin-top:16px;">
-      <button class="btn" onclick="closeModal('overlay-aigen')">Cerrar</button>
-    </div>
-  </div>
-</div>
 
 <div class="overlay" id="overlay-deletedeck">  <div class="modal">
     <div class="modal-title">Eliminar mazo</div>
@@ -1566,7 +1525,7 @@ async function generateTestFromDoc(name, base64, mediaType) {
 
     document.getElementById('testGenStatus').textContent = 'Generando preguntas...';
 
-    const response = await fetch('/.netlify/functions/claude', {
+    const response = await fetch('/.netlify/functions/aresbrain', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -1805,7 +1764,7 @@ function showTestResults() {
 // ════════════════════════════════════════
 let pdfStore = {}; // { id: { name, dataUrl, base64, size, storagePath } }
 let currentPdfId = null;
-let aiGeneratedCards = [];
+
 
 function handlePdfInput(e) {
   const file = e.target.files[0];
@@ -1889,7 +1848,7 @@ function renderPdfGrid() {
       <div class="pdf-meta">${sizeStr}</div>
       <div class="pdf-card-actions">
         <button class="btn btn-primary" onclick="openPdfViewer('${id}')">👁 Ver</button>
-        <button class="btn" onclick="openAiGenFromGrid('${id}')">✨ Flashcards IA</button>
+        
         <button class="btn btn-pdf-delete" onclick="deletePdf('${id}')">✕</button>
       </div>
     </div>`;
@@ -1929,31 +1888,7 @@ function closePdfViewer() {
   document.getElementById('pdfViewerFrame').src = '';
 }
 
-function openAiGenModal() {
-  closePdfViewer();
-  setTimeout(() => {
-    resetAiModal();
-    openModal('overlay-aigen');
-  }, 200);
-}
-
-function openAiGenFromGrid(id) {
-  currentPdfId = id;
-  resetAiModal();
-  openModal('overlay-aigen');
-}
-
-function resetAiModal() {
-  document.getElementById('aiStatus').style.display = 'none';
-  document.getElementById('aiPreviewArea').style.display = 'none';
-  document.getElementById('aiGenerateBtn').disabled = false;
-  aiGeneratedCards = [];
-  if (currentPdfId && pdfStore[currentPdfId]) {
-    document.getElementById('aiDeckName').value = pdfStore[currentPdfId].name;
-  }
-}
-
-async function deletePdf(id) {
+// Drag & drop for PDF zone
   const p = pdfStore[id];
   delete pdfStore[id];
   renderPdfGrid();
@@ -1966,93 +1901,6 @@ async function deletePdf(id) {
     }
   } catch(e) {}
   toast('PDF eliminado', 'ok');
-}
-
-async function generateFlashcardsFromPdf() {
-  if (!currentPdfId || !pdfStore[currentPdfId]) { toast('No hay PDF seleccionado', 'err'); return; }
-  const count = parseInt(document.getElementById('aiCardCount').value) || 15;
-  const pdf = pdfStore[currentPdfId];
-
-  document.getElementById('aiGenerateBtn').disabled = true;
-  document.getElementById('aiStatus').style.display = 'flex';
-  document.getElementById('aiStatusText').textContent = 'Analizando el PDF con IA...';
-  document.getElementById('aiPreviewArea').style.display = 'none';
-
-  try {
-    const response = await fetch('/.netlify/functions/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        
-        max_tokens: 4000,
-        system: `Eres un experto en crear materiales de estudio. Tu tarea es generar flashcards de estudio a partir del contenido de un PDF. 
-Responde ÚNICAMENTE con un objeto JSON válido sin texto adicional, sin bloques de código, sin explicaciones.
-El formato debe ser exactamente: {"cards":[{"q":"pregunta","a":"respuesta"},...]}
-Las preguntas deben ser claras, concretas y útiles para estudiar. Las respuestas deben ser concisas pero completas. Responde en español.`,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: pdf.base64 }
-            },
-            {
-              type: 'text',
-              text: `Genera exactamente ${count} flashcards de estudio basadas en el contenido de este documento. Cubre los conceptos más importantes. Responde solo con el JSON.`
-            }
-          ]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || 'Error de la API');
-    }
-
-    document.getElementById('aiStatusText').textContent = 'Procesando respuesta...';
-    const data = await response.json();
-    const text = data.content.map(b => b.text || '').join('');
-    
-    let parsed;
-    try {
-      const clean = text.replace(/```json|```/g,'').trim();
-      parsed = JSON.parse(clean);
-    } catch {
-      throw new Error('No se pudo procesar la respuesta de la IA. Inténtalo de nuevo.');
-    }
-
-    aiGeneratedCards = parsed.cards || [];
-    if (aiGeneratedCards.length === 0) throw new Error('La IA no generó tarjetas. Inténtalo de nuevo.');
-
-    document.getElementById('aiStatus').style.display = 'none';
-    document.getElementById('aiPreviewArea').style.display = '';
-    document.getElementById('aiPreviewCount').textContent = `${aiGeneratedCards.length} tarjetas generadas`;
-    document.getElementById('aiPreviewCards').innerHTML = aiGeneratedCards.map((c,i) =>
-      `<div class="ai-preview-card">
-        <div class="ai-preview-q">${escHtml(c.q)}</div>
-        <div class="ai-preview-a">${escHtml(c.a)}</div>
-      </div>`
-    ).join('');
-    document.getElementById('aiGenerateBtn').disabled = false;
-
-  } catch(err) {
-    document.getElementById('aiStatus').style.display = 'none';
-    document.getElementById('aiGenerateBtn').disabled = false;
-    toast('Error: ' + err.message, 'err');
-  }
-}
-
-function saveAiCards() {
-  if (aiGeneratedCards.length === 0) return;
-  const name = document.getElementById('aiDeckName').value.trim() || 'Mazo desde PDF';
-  const id = 'deck_' + Date.now();
-  state.decks[id] = { name, cards: aiGeneratedCards.map(c => ({q:c.q, a:c.a})) };
-  saveState();
-  closeModal('overlay-aigen');
-  aiGeneratedCards = [];
-  toast(`✨ Mazo "${name}" creado con ${state.decks[id].cards.length} tarjetas`, 'ok');
-  showView('study', id);
 }
 
 // Drag & drop for PDF zone
