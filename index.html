@@ -1570,7 +1570,7 @@ async function generateTestFromDoc(name, base64, mediaType) {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        model:'claude-sonnet-4-20250514',
+        
         max_tokens:5000,
         system:`Eres un experto en crear tests de evaluación. A partir del documento, genera preguntas de test variadas.
 Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin bloques de código.
@@ -1983,7 +1983,7 @@ async function generateFlashcardsFromPdf() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        
         max_tokens: 4000,
         system: `Eres un experto en crear materiales de estudio. Tu tarea es generar flashcards de estudio a partir del contenido de un PDF. 
 Responde ÚNICAMENTE con un objeto JSON válido sin texto adicional, sin bloques de código, sin explicaciones.
