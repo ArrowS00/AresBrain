@@ -1013,25 +1013,75 @@ let studyFlipped = false;
 let importPreviewCards = [];
 
 // ════════════════════════════════════════
-//  PERSISTENCE (localStorage)
+//  SUPABASE
 // ════════════════════════════════════════
-function loadState() {
+const SB_URL = 'https://pkrvgctsjbcytlfdkvyj.supabase.co';
+const SB_KEY = 'sb_publishable_ca2_-a8KIim31slnIe5Ulw_d4MMZ3rO';
+
+async function sbFetch(path, options={}) {
+  const res = await fetch(SB_URL + path, {
+    ...options,
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      ...(options.headers||{})
+    }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.message || 'Error Supabase ' + res.status);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+}
+
+// ════════════════════════════════════════
+//  PERSISTENCE (Supabase)
+// ════════════════════════════════════════
+async function loadState() {
   try {
-    const saved = localStorage.getItem('aresbrain_state');
-    if (saved) { state = JSON.parse(saved); }
-  } catch(e) {}
+    // Load decks
+    const decks = await sbFetch('/rest/v1/decks?select=*');
+    decks.forEach(d => { state.decks[d.id] = { name: d.name, cards: d.cards }; });
+    // Load stats
+    const stats = await sbFetch('/rest/v1/stats?id=eq.1&select=*');
+    if (stats[0]) { state.stats.sessions = stats[0].sessions||0; state.stats.lastScore = stats[0].last_score; }
+  } catch(e) { console.warn('Supabase load error:', e); }
+
   // Ensure default deck exists
   if (!state.decks[DEFAULT_DECK_ID]) {
     state.decks[DEFAULT_DECK_ID] = {
       name: 'Celador — Ley 55/2003',
       cards: DEFAULT_CARDS.map(([q,a]) => ({q,a}))
     };
-    saveState();
+    await saveState();
   }
 }
 
-function saveState() {
-  try { localStorage.setItem('aresbrain_state', JSON.stringify(state)); } catch(e) {}
+async function saveState() {
+  try {
+    // Upsert all decks
+    const rows = Object.entries(state.decks).map(([id,d]) => ({ id, name: d.name, cards: d.cards }));
+    if (rows.length > 0) {
+      await sbFetch('/rest/v1/decks', {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(rows)
+      });
+    }
+    // Upsert stats
+    await sbFetch('/rest/v1/stats', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([{ id:1, sessions: state.stats.sessions, last_score: state.stats.lastScore }])
+    });
+  } catch(e) { console.warn('Supabase save error:', e); }
+}
+
+async function deleteDeckFromDB(id) {
+  try { await sbFetch(`/rest/v1/decks?id=eq.${id}`, { method:'DELETE' }); } catch(e) {}
 }
 
 // ════════════════════════════════════════
@@ -1074,13 +1124,13 @@ function showView(name, deckId) {
   } else if (name === 'pdfs') {
     document.getElementById('topbarTitle').textContent = 'Mis PDFs';
     document.getElementById('nav-pdfs').classList.add('active');
-    renderPdfGrid();
+    loadPdfsFromDB().then(renderPdfGrid);
   } else if (name === 'tests') {
     document.getElementById('topbarTitle').textContent = 'Tests';
     document.getElementById('nav-tests').classList.add('active');
     document.getElementById('dropZoneTest').style.display = '';
     document.getElementById('testGeneratingArea').style.display = 'none';
-    renderSavedTests();
+    loadSavedTestsAsync().then(renderSavedTests);
   } else if (name === 'takingtest') {
     document.getElementById('topbarTitle').textContent = savedTests[activeTest.id]?.name || 'Test';
     document.getElementById('nav-tests').classList.add('active');
@@ -1303,9 +1353,10 @@ function confirmDeleteDeck() {
   openModal('overlay-deletedeck');
 }
 
-function deleteDeck() {
-  delete state.decks[state.editingDeckId];
-  saveState();
+async function deleteDeck() {
+  const id = state.editingDeckId;
+  delete state.decks[id];
+  await deleteDeckFromDB(id);
   closeModal('overlay-deletedeck');
   showView('dashboard');
   toast('Mazo eliminado', 'ok');
@@ -1445,13 +1496,30 @@ let savedTests = {}; // { id: { name, questions:[{text,type,options,correct,expl
 let activeTest = { id:null, questions:[], idx:0, answers:[], answered:false };
 
 function loadSavedTests() {
-  try {
-    const s = localStorage.getItem('aresbrain_tests');
-    if (s) savedTests = JSON.parse(s);
-  } catch(e) {}
+  // Tests loaded async in showView('tests')
 }
-function saveSavedTests() {
-  try { localStorage.setItem('aresbrain_tests', JSON.stringify(savedTests)); } catch(e) {}
+async function loadSavedTestsAsync() {
+  try {
+    const rows = await sbFetch('/rest/v1/tests?select=*&order=created_at.desc');
+    savedTests = {};
+    rows.forEach(r => { savedTests[r.id] = { name: r.name, questions: r.questions, created: r.created_at }; });
+  } catch(e) { console.warn('Tests load error:', e); }
+}
+async function saveSavedTests() {
+  // saved individually on create
+}
+async function saveTestToDB(id) {
+  const t = savedTests[id];
+  try {
+    await sbFetch('/rest/v1/tests', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([{ id, name: t.name, questions: t.questions }])
+    });
+  } catch(e) { console.warn('Test save error:', e); }
+}
+async function deleteTestFromDB(id) {
+  try { await sbFetch(`/rest/v1/tests?id=eq.${id}`, { method:'DELETE' }); } catch(e) {}
 }
 
 function handleTestFileInput(e) {
@@ -1545,7 +1613,7 @@ La explicación debe ser clara, educativa y mencionar por qué las opciones inco
 
     const id = 'test_' + Date.now();
     savedTests[id] = { name, questions, created: Date.now() };
-    saveSavedTests();
+    await saveTestToDB(id);
 
     document.getElementById('testGeneratingArea').style.display = 'none';
     document.getElementById('dropZoneTest').style.display = '';
@@ -1579,9 +1647,9 @@ function renderSavedTests() {
   }).join('');
 }
 
-function deleteTest(id) {
+async function deleteTest(id) {
   delete savedTests[id];
-  saveSavedTests();
+  await deleteTestFromDB(id);
   renderSavedTests();
   toast('Test eliminado', 'ok');
 }
@@ -1733,10 +1801,9 @@ function showTestResults() {
 }
 
 // ════════════════════════════════════════
-//  PDFs
+//  PDFs (Supabase Storage)
 // ════════════════════════════════════════
-// PDFs stored in memory only (too large for localStorage)
-let pdfStore = {}; // { id: { name, dataUrl, base64, size } }
+let pdfStore = {}; // { id: { name, dataUrl, base64, size, storagePath } }
 let currentPdfId = null;
 let aiGeneratedCards = [];
 
@@ -1746,15 +1813,64 @@ function handlePdfInput(e) {
   e.target.value = '';
   if (file.size > 20 * 1024 * 1024) { toast('El PDF es demasiado grande (máx 20MB)', 'err'); return; }
   const reader = new FileReader();
-  reader.onload = ev => {
+  reader.onload = async ev => {
     const dataUrl = ev.target.result;
     const base64 = dataUrl.split(',')[1];
     const id = 'pdf_' + Date.now();
-    pdfStore[id] = { name: file.name.replace(/\.pdf$/i,''), dataUrl, base64, size: file.size };
+    const storagePath = id + '/' + file.name;
+    pdfStore[id] = { name: file.name.replace(/\.pdf$/i,''), dataUrl, base64, size: file.size, storagePath };
+    // Upload to Supabase Storage
+    try {
+      await fetch(`${SB_URL}/storage/v1/object/documents/${storagePath}`, {
+        method: 'POST',
+        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/pdf' },
+        body: file
+      });
+      // Save metadata to DB
+      await sbFetch('/rest/v1/pdfs', {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ id, name: pdfStore[id].name, size: file.size, storage_path: storagePath }])
+      });
+      toast(`PDF "${pdfStore[id].name}" guardado en la nube ☁️`, 'ok');
+    } catch(err) {
+      toast('PDF cargado solo en memoria (error al guardar en nube)', 'err');
+    }
     renderPdfGrid();
-    toast(`PDF "${pdfStore[id].name}" añadido`, 'ok');
   };
   reader.readAsDataURL(file);
+}
+
+async function loadPdfsFromDB() {
+  try {
+    const rows = await sbFetch('/rest/v1/pdfs?select=*&order=created_at.desc');
+    rows.forEach(r => {
+      if (!pdfStore[r.id]) {
+        // Stored in Supabase but not loaded yet — show as cloud entry
+        pdfStore[r.id] = { name: r.name, size: r.size, storagePath: r.storage_path, dataUrl: null, base64: null, cloud: true };
+      }
+    });
+  } catch(e) {}
+}
+
+async function downloadPdfFromCloud(id) {
+  const p = pdfStore[id];
+  if (!p || !p.storagePath) return false;
+  try {
+    toast('Descargando PDF...', '');
+    const res = await fetch(`${SB_URL}/storage/v1/object/public/documents/${p.storagePath}`, {
+      headers: { 'apikey': SB_KEY }
+    });
+    if (!res.ok) throw new Error('No se pudo descargar');
+    const blob = await res.blob();
+    const dataUrl = await new Promise(resolve => {
+      const fr = new FileReader(); fr.onload = e => resolve(e.target.result); fr.readAsDataURL(blob);
+    });
+    pdfStore[id].dataUrl = dataUrl;
+    pdfStore[id].base64 = dataUrl.split(',')[1];
+    pdfStore[id].cloud = false;
+    return true;
+  } catch(e) { toast('Error al descargar el PDF', 'err'); return false; }
 }
 
 function renderPdfGrid() {
@@ -1765,10 +1881,12 @@ function renderPdfGrid() {
   grid.innerHTML = ids.map(id => {
     const p = pdfStore[id];
     const kb = (p.size/1024).toFixed(0);
+    const sizeStr = kb > 1024 ? (kb/1024).toFixed(1)+'MB' : kb+'KB';
+    const cloudBadge = p.cloud ? `<span style="font-size:0.68rem;color:var(--accent);margin-left:4px;">☁️ nube</span>` : '';
     return `<div class="pdf-card">
       <div class="pdf-icon">📄</div>
-      <div class="pdf-name">${escHtml(p.name)}</div>
-      <div class="pdf-meta">${kb > 1024 ? (kb/1024).toFixed(1)+'MB' : kb+'KB'}</div>
+      <div class="pdf-name">${escHtml(p.name)}${cloudBadge}</div>
+      <div class="pdf-meta">${sizeStr}</div>
       <div class="pdf-card-actions">
         <button class="btn btn-primary" onclick="openPdfViewer('${id}')">👁 Ver</button>
         <button class="btn" onclick="openAiGenFromGrid('${id}')">✨ Flashcards IA</button>
@@ -1778,15 +1896,21 @@ function renderPdfGrid() {
   }).join('');
 }
 
-function openPdfViewer(id) {
-  currentPdfId = id;
+async function openPdfViewer(id) {
   const p = pdfStore[id];
-  document.getElementById('pdfViewerTitle').textContent = p.name;
-  document.getElementById('pdfViewerFrame').src = p.dataUrl;
+  if (!p) return;
+  // If only in cloud, download first
+  if (!p.dataUrl) {
+    const ok = await downloadPdfFromCloud(id);
+    if (!ok) return;
+  }
+  currentPdfId = id;
+  document.getElementById('pdfViewerTitle').textContent = pdfStore[id].name;
+  document.getElementById('pdfViewerFrame').src = pdfStore[id].dataUrl;
   document.getElementById('pdfViewerOverlay').classList.add('show');
   // Update sidebar last PDF
   document.getElementById('lastPdfSection').style.display = '';
-  document.getElementById('lastPdfName').textContent = p.name;
+  document.getElementById('lastPdfName').textContent = pdfStore[id].name;
   document.getElementById('lastPdfItem').dataset.pdfId = id;
 }
 
@@ -1829,9 +1953,18 @@ function resetAiModal() {
   }
 }
 
-function deletePdf(id) {
+async function deletePdf(id) {
+  const p = pdfStore[id];
   delete pdfStore[id];
   renderPdfGrid();
+  try {
+    await sbFetch(`/rest/v1/pdfs?id=eq.${id}`, { method:'DELETE' });
+    if (p?.storagePath) {
+      await fetch(`${SB_URL}/storage/v1/object/documents/${p.storagePath}`, {
+        method:'DELETE', headers:{ 'apikey':SB_KEY, 'Authorization':'Bearer '+SB_KEY }
+      });
+    }
+  } catch(e) {}
   toast('PDF eliminado', 'ok');
 }
 
@@ -1958,10 +2091,20 @@ function loadTheme() {
 // ════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════
-loadState();
-loadSavedTests();
-loadTheme();
-showView('dashboard');
+async function init() {
+  loadTheme();
+  // Show loading overlay
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="loadingOverlay" style="position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:16px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.5rem;letter-spacing:0.08em;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">AresBrain</div>
+      <div class="spinner" style="width:28px;height:28px;border-width:3px;"></div>
+      <div style="font-size:0.8rem;color:var(--muted);">Cargando tu contenido...</div>
+    </div>`);
+  await loadState();
+  document.getElementById('loadingOverlay').remove();
+  showView('dashboard');
+}
+init();
 </script>
 </body>
 </html>
