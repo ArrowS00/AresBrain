@@ -1213,12 +1213,12 @@ function prevCard() {
   if (studyIdx > 0) { studyIdx--; renderStudyCard(); }
 }
 
-function finishStudy() {
+async function finishStudy() {
   const total = studyGood + studyBad;
   const pct = total ? Math.round((studyGood/total)*100) : 0;
   state.stats.sessions++;
   state.stats.lastScore = pct;
-  saveState();
+  await saveState();
   document.getElementById('studyProgress').style.width = '100%';
   document.getElementById('studyCardArea').style.display = 'none';
   document.getElementById('studyFinish').classList.remove('hidden');
@@ -1258,10 +1258,10 @@ function updateCard(idx, field, val) {
   deck.cards[idx][field] = val;
 }
 
-function addRow() {
+async function addRow() {
   const deck = state.decks[state.editingDeckId];
   deck.cards.push({q:'', a:''});
-  saveState();
+  await saveState();
   renderEditor(state.editingDeckId);
   // Scroll to bottom
   const tbody = document.getElementById('editorBody');
@@ -1269,14 +1269,14 @@ function addRow() {
   if (last) { last.scrollIntoView({behavior:'smooth'}); last.querySelector('textarea').focus(); }
 }
 
-function deleteRow(idx) {
+async function deleteRow(idx) {
   const deck = state.decks[state.editingDeckId];
   deck.cards.splice(idx, 1);
-  saveState();
+  await saveState();
   renderEditor(state.editingDeckId);
 }
 
-function saveDeck() {
+async function saveDeck() {
   // Sync all textarea values
   const deck = state.decks[state.editingDeckId];
   document.querySelectorAll('#editorBody textarea').forEach(ta => {
@@ -1286,7 +1286,7 @@ function saveDeck() {
   });
   // Remove completely empty rows
   deck.cards = deck.cards.filter(c => c.q.trim() || c.a.trim());
-  saveState();
+  await saveState();
   renderEditor(state.editingDeckId);
   renderSidebar();
   toast('Mazo guardado', 'ok');
@@ -1381,13 +1381,13 @@ function showImportPreview(fname, cards) {
   ).join('') + (cards.length>10 ? `<tr><td colspan="3" style="text-align:center;color:var(--muted);font-size:0.8rem;padding:10px">... y ${cards.length-10} más</td></tr>` : '');
 }
 
-function confirmImport() {
+async function confirmImport() {
   if (importPreviewCards.length === 0) return;
   // Try to guess name from context — use default
   const id = 'deck_' + Date.now();
   const name = document.getElementById('previewTitle').textContent.replace(/\.csv$/i,'').replace(/_/g,' ');
   state.decks[id] = { name, cards: importPreviewCards };
-  saveState();
+  await saveState();
   importPreviewCards = [];
   document.getElementById('importPreview').classList.add('hidden');
   toast(`Mazo "${name}" importado con éxito`, 'ok');
@@ -1404,12 +1404,12 @@ function cancelImport() {
 // ════════════════════════════════════════
 function openNewDeck() { document.getElementById('newDeckName').value=''; openModal('overlay-newdeck'); setTimeout(()=>document.getElementById('newDeckName').focus(),100); }
 
-function createDeck() {
+async function createDeck() {
   const name = document.getElementById('newDeckName').value.trim();
   if (!name) { toast('Escribe un nombre para el mazo','err'); return; }
   const id = 'deck_' + Date.now();
   state.decks[id] = { name, cards: [] };
-  saveState();
+  await saveState();
   closeModal('overlay-newdeck');
   showView('editor', id);
   toast('Mazo creado', 'ok');
